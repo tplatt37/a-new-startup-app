@@ -1,0 +1,81 @@
+#
+# This is a buildspec file you can use to create a Container Image via CodeBuild
+#
+version: 0.2
+
+# Assume we are using Ubuntu/7.0 codebuild image aka aws/codebuild/standard:7.0
+
+env:
+  exported-variables:
+    - REPOSITORY_URI
+    - IMAGE_TAG
+  
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      # Should be v2.
+      - aws --version
+      - docker --version
+      
+      # Which shell are we using?
+      - echo "Using shell..."
+      - ls -lha $(which sh) 
+      
+      - ACCOUNTID=$(aws sts get-caller-identity --query "Account" --output text)
+      - echo "ACCOUNTID=$ACCOUNTID"
+
+      # Environment variables - just to show you what is there
+      - env
+
+      #
+      # Must login to private repo 
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ACCOUNTID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      #
+      # You can set a Build Env Var (OVERRIDE_REPO_NAME) to control which repo we push to.  It defaults to a-new-startup
+      - REPO_NAME=${OVERRIDE_REPO_NAME:-"a-new-startup"}
+      - REPOSITORY_URI=$ACCOUNTID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$REPO_NAME
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - echo "COMMIT_HASH=$COMMIT_HASH"
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - echo "IMAGE_TAG=$IMAGE_TAG"
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image...
+      #
+      # BUILD
+      #
+      - docker build -t a-new-startup .
+      #
+      # TAG
+      # 
+      - docker tag a-new-startup $REPOSITORY_URI:$IMAGE_TAG
+      #
+  post_build:
+    commands:
+      - echo Build is completed on `date`
+      - echo Pushing the Docker images...
+      #
+      # PUSH
+      #
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      #
+      #
+      # Once we have the container image built and pushed, there are multiple ways to deploy to ECS.
+      # We generate metadata files for 2 of them for convenience.
+      #
+      # Use this imagedefinitions.json when deploying via CodePipeline Deploy with Action Provider of ECS (Standard deploy)
+      - printf '[{"name":"a-new-startup","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+      #
+      # Use this when deploying via CloudFormation (This is simply the format to override parameters in a template)
+      - printf '{"Parameters":{"ImageURI":"%s"}}' $REPOSITORY_URI:$IMAGE_TAG > stackparams.json
+      #
+artifacts:
+    files: 
+      - imagedefinitions.json
+      - stackparams.json
+      # This is used for an ECS Demo, it has a default ImageURI parameter and the stackparams.json will override the value.
+      - ecs-service.yaml
+      # This file isn't created here, or part of the source, but required for some manual demos that I do (ignore it)
+      - service-task.yml

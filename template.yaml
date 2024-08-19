@@ -1,0 +1,235 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "A-New-Startup - Backend services needed by the code - DDB/SNS/SQS"
+#
+# The resources created here will have dynamic and unique names.
+# If you want static names for a local build - use template-static-names.yaml instead.
+#
+# This template is meant for use by the automated CI/CD pipelines (but you can use it too!)
+# Please note that it uses EXPORTS (which have to have unique names per region/account)
+#
+# It also includes an IAM Policy that will grant all the permissions needed by the application (DDB PutItem, etc.)
+
+Parameters:
+
+  Prefix:
+    Type: String
+    Default: "a-new-startup"
+    Description: "A Prefix to use on the resource and export names. You should probably not change this."
+    
+  Environment:
+    Type: String
+    Default: dev
+    Description: "Environment name for the SSM parameters created."
+
+Resources:
+
+  StartupSignupsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      # No TableName specified, a dynamic name will be generated.
+      BillingMode: 'PAY_PER_REQUEST'
+      AttributeDefinitions:
+        -
+          AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - 
+          AttributeName: email
+          KeyType: HASH 
+  
+  NewSignupQueue: 
+    Type: AWS::SQS::Queue
+      
+  NewSignupTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+      - Endpoint:
+          Fn::GetAtt: [NewSignupQueue, Arn]
+        Protocol: sqs
+
+  AllowSNS2SQSPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      PolicyDocument:
+        Id: PublicationPolicy
+        Statement:
+        - Action: ['sqs:SendMessage']
+          Condition:
+            ArnEquals:
+              aws:SourceArn: {Ref: NewSignupTopic}
+          Effect: Allow
+          Principal: {AWS: '*'}
+          Resource:
+            Fn::GetAtt: [NewSignupQueue, Arn]
+          Sid: Allow-SNS-SendMessage
+        Version: '2012-10-17'
+      Queues:
+      - {Ref: NewSignupQueue}
+
+  #
+  # NOTE: The following are referenced by the scripts/start_server script.
+  # When running running on EC2, the CodeDeploy agent will execute that as a hook.
+  # These have the "ENVIRONMENT" embedded in them - here it's dev (for development)
+  # If you wanted to extend for there to be a qa environment you'd have to make changes here.
+  #
+  # These can also be referenced when creating a container image - to set as appropriate the
+  # Environment variables of the container image
+  # See build_container as an example
+  #
+  # However, when running in ECS or EKS, we use the facilities of those orchestrators to set the environment variables
+  # (For ECS in the "Task Definiton" and for EKS in the Deployment / podspec)
+  #
+  
+  SSMParamAccount:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: 
+        !Sub
+          - '/${Param}'
+          - Param: !Join
+            - '/'
+            - - !Ref Prefix
+              - !Ref Environment
+              - "aws-account"
+      Type: String
+      Value: !Ref AWS::AccountId
+      Tags:
+        demo: a-new-startup
+
+  SSMParamTable:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: 
+        !Sub
+          - '/${Param}'
+          - Param: !Join
+            - '/'
+            - - !Ref Prefix
+              - !Ref Environment
+              - "tablename"
+      Type: String
+      Value: !Ref StartupSignupsTable
+      Tags:
+        demo: a-new-startup
+
+  SSMParamTopic:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        !Sub
+          - '/${Param}'
+          - Param: !Join
+            - '/'
+            - - !Ref Prefix
+              - !Ref Environment
+              - "topicarn"
+      Type: String
+      Value: !Ref NewSignupTopic
+      Tags:
+        demo: a-new-startup
+        
+  AppManagedPolicy:
+      Type: AWS::IAM::ManagedPolicy
+      # Basic application level permissions needed for a-new-startup to run.
+      Properties:
+        # No PolicyName used, we want a unique name generated automatically
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'dynamodb:PutItem'
+              Resource:
+                - Fn::Join:
+                    - ""
+                    - - "arn:"
+                      - Ref: AWS::Partition
+                      - ":dynamodb:"
+                      - Ref: AWS::Region
+                      - ":"
+                      - Ref: AWS::AccountId
+                      # Note how we use wildcards.  The backend resource names must start with a-new-startup
+                      - :table/a-new-startup*
+            - Effect: Allow
+              Action:
+                - 'ssm:GetParameter*'
+              Resource:
+                - Fn::Join:
+                    - ""
+                    - - "arn:"
+                      - Ref: AWS::Partition
+                      - ":ssm:"
+                      - Ref: AWS::Region
+                      - ":"
+                      - Ref: AWS::AccountId
+                      - :parameter/a-new-startup*
+            - Effect: Allow
+              Action:
+                - 'sns:Publish'
+              Resource:
+                - Fn::Join:
+                    - ""
+                    - - "arn:"
+                      - Ref: AWS::Partition
+                      - ":sns:"
+                      - Ref: AWS::Region
+                      - ":"
+                      - Ref: AWS::AccountId
+                      - :a-new-startup*
+            # If using X-Ray, the Daemon will need these permissions to upload data to cloud.
+            - Effect: Allow
+              Action: 
+                - "xray:PutTraceSegments"
+                - "xray:PutTelemetryRecords"
+                - "xray:GetSamplingRules"
+                - "xray:GetSamplingTargets"
+                - "xray:GetSamplingStatisticSummaries"
+              Resource: "*"
+            # The ec2 instance will need to be able to download the bundle (CodeDeploy)
+            # This requires the build to be in a bucket that starts with a-new-startup*
+            - Effect: Allow
+              Action:
+                - 's3:Get*'
+                - 's3:List*'
+              Resource:
+                - Fn::Join:
+                    - ""
+                    - - "arn:"
+                      - Ref: AWS::Partition
+                      - ":s3"
+                      - ":"
+                      - ":"
+                      - ":a-new-startup*"
+                - Fn::Join:
+                    - ""
+                    - - "arn:"
+                      - Ref: AWS::Partition
+                      - ":s3"
+                      - ":"
+                      - ":"
+                      - ":a-new-startup*/*"
+
+Outputs:
+
+  # Using the technique of chained stacks, other CFN stacks will need these values.
+  
+  TableName:
+    Value: !Ref StartupSignupsTable
+    Export:
+      Name: !Join ['-', [!Ref Prefix, 'TableName']]
+      
+  TopicArn:
+    Value: !Ref NewSignupTopic
+    Export:
+      Name: !Join ['-', [!Ref Prefix, 'TopicArn']]
+
+  QueueArn:
+    Value: !GetAtt NewSignupQueue.Arn
+    Export:
+      Name: !Join ['-', [!Ref Prefix, 'QueueArn']]
+
+  AppManagedPolicy:
+    Value: !Ref AppManagedPolicy
+    Export:
+      Name: !Join ['-', [!Ref Prefix, 'AppManagedPolicy']]

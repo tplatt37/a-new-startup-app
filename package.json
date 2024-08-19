@@ -1,0 +1,46 @@
+{
+  "name": "a-new-startup",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "aws-sdk": "latest",
+    "aws-xray-sdk": "latest",
+    "body-parser": "latest",
+    "ejs": "latest",
+    "express": "latest",
+    "os": "latest"
+  },
+  "devDependencies": {
+    "babel-cli": "latest",
+    "babel-preset-env": "latest",
+    "jest": "latest",
+    "jest-junit": "latest",
+    "superagent": "latest",
+    "supertest": "latest"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "test": "jest"
+  },
+  "jest": {
+    "verbose": true,
+    "testTimeout": 30000,
+    "testMatch": [
+      "**/test/*.js?(x)"
+    ],
+    "setupFiles": [
+      "./.jest/setEnvVars.js"
+    ],
+    "reporters": [
+      "default",
+      [
+        "jest-junit",
+        { "outputDirectory": "./reports",
+        "outputName": "jest-unit-test-report.xml"
+        }
+      ]
+      
+    ]
+  }
+}

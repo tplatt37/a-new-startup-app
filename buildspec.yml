@@ -1,0 +1,57 @@
+#
+# Simple buildspec file to build and run unit tests in CodeBuild
+#
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      # Assume using aws/codebuild/standard:7.0 (Ubuntu with NodeJS 18)
+      # NOTE: As of 2023-09-12 this will be v18.16.1
+      nodejs: 18
+    commands:
+      - echo "Node version..."
+      - node --version
+      - npm --version
+    
+      # Which shell are we using?
+      - echo "Using shell..."
+      - ls -lha $(which sh) 
+
+      # Environment variables - just to show you what is there
+      - env
+    
+      # Install dependencies needed for running tests
+      # 2023-09-12 - Pinning to v9.8.1 because that will work with Node v18.16.1 (10.+ requires 18.17.0 and above)
+      - npm install -g npm@9.8.1
+      - npm install
+
+  pre_build:
+    commands:
+      # Discover and run unit tests in the 'tests' directory
+      - npm run test
+  build:
+    commands:
+      # Remove existing node_modules to clear dev dependencies
+      - rm -r node_modules
+
+      # Install runtime dependencies - but not dev dependencies
+      - npm install --omit=dev
+
+# See package.json - we use jest-junit to create XML reports of the unit test results.
+# Set up test reporting with Jest (CodeBuild): https://docs.aws.amazon.com/codebuild/latest/userguide/test-report-jest.html
+reports:
+  jest_reports:
+    files:
+    - jest-unit-test-report.xml
+    file-format: JUNITXML
+    base-directory: reports
+    
+artifacts:
+  files:
+    - package.json
+    - appspec.yml
+    - src/**/*
+    - misc/*
+    - scripts/*
+    - node_modules/**/*
